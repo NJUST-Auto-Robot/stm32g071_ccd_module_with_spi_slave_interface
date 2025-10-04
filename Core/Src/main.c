@@ -34,7 +34,7 @@ uint32_t pixel_sum;
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+#include "string.h"
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -61,15 +61,14 @@ enum E_state {
     E_wait_sh_raising,
     E_wait_icg_raising,
     E_wait_dma_ok,
-    // E_wait_dma_ok,
 };
 __IO enum E_state cur_state;
 uint16_t adc_data[1546];
-uint16_t adc_data_static[USE_DATA_NUM];
 uint8_t adc_data_static_u8[USE_DATA_NUM];
 __IO uint8_t ccd_frame_ok = 0;
-int32_t explose_time_us = 2000;
+__IO int32_t explose_time_us = 2000;
 void ccd_start_icg(void);
+void ccd_one_frame_ok(void);
 __IO uint8_t ccd_want_update_sh_v = 0;
 void ccd_want_update_sh(void)
 {
@@ -111,8 +110,6 @@ void ccd_sh_want_raise(void)
     LL_TIM_DisableIT_CC2(TIM2);
     if (TIM2->CNT < TIM2->CCR2)
     {
-        // __IO uint8_t x;
-        // (void)x;
         ccd_waiting_sh();
     }
     else if (E_wait_sh_raising == cur_state)
@@ -135,7 +132,6 @@ void ccd_start_icg(void)
 }
 void ccd_end_icg(void)
 {
-    // LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_6);
     LL_TIM_ClearFlag_UPDATE(TIM16);
     LL_TIM_DisableIT_UPDATE(TIM16);
     LL_TIM_DisableCounter(TIM16);
@@ -158,7 +154,6 @@ void ccd_end_transfer(void)
 {
     static int is_first = 0;
     LL_ADC_REG_StopConversion(ADC1);
-    // LL_ADC_Disable(ADC1);
     LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_1);
     LL_DMA_ClearFlag_HT1(DMA1);
     LL_DMA_ClearFlag_TE1(DMA1);
@@ -197,11 +192,16 @@ void ccd_end_transfer(void)
             // }
             // else
             // {
-            ccd_frame_ok = 1;
+            ccd_one_frame_ok();
             ccd_waiting_sh();
             // }
         }
     }
+}
+void ccd_one_frame_ok(void)
+{
+    ccd_frame_ok = 1;
+    LL_GPIO_ResetOutputPin(DR_IRQ_GPIO_Port, DR_IRQ_Pin);
 }
 /* USER CODE END PFP */
 
@@ -244,6 +244,50 @@ void pid_calc_timely(void)
         }
     }
 }
+__IO uint8_t spi_in_use = 0;
+typedef struct {
+    uint16_t frame_head;
+    uint16_t frame_len;
+    uint16_t explose_time_us;
+    uint8_t frame_mode;
+    uint8_t frame_index;
+    uint16_t frame_tail;
+    uint8_t frame_data[USE_DATA_NUM];
+}__attribute__((packed)) frame_data_t;
+frame_data_t frame_data;
+void cs_falling_irq(void)
+{
+    CLEAR_BIT(SPI2->CR1, SPI_CR1_SSI);
+    spi_in_use = 1;
+    LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_2);
+    // LL_SPI_Enable(SPI2);
+    //LL_SPI_TransmitData8(SPI2, 0xf0);
+    LL_DMA_SetMemoryAddress(DMA1, LL_DMA_CHANNEL_2, (uint32_t)&frame_data);
+    LL_DMA_SetPeriphAddress(DMA1, LL_DMA_CHANNEL_2, LL_SPI_DMA_GetRegAddr(SPI2));
+    LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_2, sizeof(frame_data));
+    LL_DMA_ClearFlag_HT2(DMA1);
+    LL_DMA_ClearFlag_TE2(DMA1);
+    LL_DMA_ClearFlag_TC2(DMA1);
+    LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_2);
+    LL_SPI_EnableDMAReq_TX(SPI2);
+}
+void cs_raising_irq(void)
+{
+    SET_BIT(SPI2->CR1, SPI_CR1_SSI);
+    LL_SPI_DisableDMAReq_TX(SPI2);
+    // LL_SPI_Disable(SPI2);
+    LL_DMA_ClearFlag_HT2(DMA1);
+    LL_DMA_ClearFlag_TE2(DMA1);
+    LL_DMA_ClearFlag_TC2(DMA1);
+    LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_2);
+    spi_in_use = 0;
+    LL_GPIO_SetOutputPin(DR_IRQ_GPIO_Port, DR_IRQ_Pin);
+}
+void spi_end_transfer(void)
+{
+
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -289,7 +333,7 @@ int main(void)
   MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
 
-                                          // \phi m clock 2Mhz
+    // \phi m clock 2Mhz
     TIM3->PSC = 0;
     TIM3->ARR = 31;
     TIM3->CCR2 = 15;
@@ -320,8 +364,6 @@ int main(void)
     LL_ADC_Enable(ADC1);
     // LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_8);
 
-    LL_SPI_Enable(SPI2);
-
     PID_struct_init(&explose_pid, DELTA_PID, 100000, 100000, 0.01, 0, 0);
     TIM17->PSC = 63999;
     TIM17->ARR = 50;
@@ -330,6 +372,12 @@ int main(void)
     //LL_ADC_REG_StartConversion(ADC1);
     // LL_mDelay(1);
     ccd_waiting_sh();
+
+    LL_EXTI_EnableRisingTrig_0_31(LL_EXTI_LINE_8);
+    LL_EXTI_EnableFallingTrig_0_31(LL_EXTI_LINE_8);
+    LL_EXTI_EnableIT_0_31(LL_EXTI_LINE_8);
+    LL_SPI_Enable(SPI2);
+
     // ccd_start_icg();
   /* USER CODE END 2 */
 
@@ -337,24 +385,38 @@ int main(void)
   /* USER CODE BEGIN WHILE */
     while (1)
     {
-        if (ccd_frame_ok)
+        if (spi_in_use == 0)
         {
-            ccd_frame_ok = 0;
-            uint8_t d[8] = { 0x3d, 0x7e ,0,0,1,0, 0x7e, 0x3d };
-            *(uint16_t*)(d + 2) = USE_DATA_NUM;
-            LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_8);
-            //LL_mDelay(1);
-            spi_trams(d, 8);
-            if (d[4])
-                spi_trams((uint8_t*)adc_data_static_u8, *(uint16_t*)(d + 2));
-            else
+            if (ccd_frame_ok)
             {
-                spi_trams((uint8_t*)&adc_data[32 + (1500 - USE_DATA_NUM) / 2], (*(uint16_t*)(d + 2)) * 2);
+                ccd_frame_ok = 0;
+                frame_data.frame_head = 0x2107;
+                frame_data.frame_len = USE_DATA_NUM;
+                frame_data.explose_time_us = explose_time_us;
+                frame_data.frame_mode = 1;
+                frame_data.frame_index++;
+                frame_data.frame_tail = 0x0721;
+                memcpy(frame_data.frame_data, adc_data_static_u8, USE_DATA_NUM);
             }
-            LL_mDelay(1);
-            LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_8);
-            LL_mDelay(1);
         }
+        // if (ccd_frame_ok)
+    // {
+    //     ccd_frame_ok = 0;
+    //     uint8_t d[8] = { 0x3d, 0x7e ,0,0,1,0, 0x7e, 0x3d };
+    //     *(uint16_t*)(d + 2) = USE_DATA_NUM;
+    //     LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_8);
+    //     //LL_mDelay(1);
+    //     spi_trams(d, 8);
+    //     if (d[4])
+    //         spi_trams((uint8_t*)adc_data_static_u8, *(uint16_t*)(d + 2));
+    //     else
+    //     {
+    //         spi_trams((uint8_t*)&adc_data[32 + (1500 - USE_DATA_NUM) / 2], (*(uint16_t*)(d + 2)) * 2);
+    //     }
+    //     LL_mDelay(1);
+    //     LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_8);
+    //     LL_mDelay(1);
+    // }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -414,7 +476,7 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-                                            /* User can add his own implementation to report the HAL error return state */
+                                                  /* User can add his own implementation to report the HAL error return state */
     __disable_irq();
     while (1)
     {
@@ -433,8 +495,8 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-                                            /* User can add his own implementation to report the file name and line number,
-                                               ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+                                                  /* User can add his own implementation to report the file name and line number,
+                                                     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

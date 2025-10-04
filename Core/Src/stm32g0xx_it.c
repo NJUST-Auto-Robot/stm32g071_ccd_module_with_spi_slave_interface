@@ -152,14 +152,16 @@ void EXTI4_15_IRQHandler(void)
   {
     LL_EXTI_ClearFallingFlag_0_31(LL_EXTI_LINE_8);
     /* USER CODE BEGIN LL_EXTI_LINE_8_FALLING */
-
+        void cs_falling_irq(void);
+        cs_falling_irq();
     /* USER CODE END LL_EXTI_LINE_8_FALLING */
   }
   if (LL_EXTI_IsActiveRisingFlag_0_31(LL_EXTI_LINE_8) != RESET)
   {
     LL_EXTI_ClearRisingFlag_0_31(LL_EXTI_LINE_8);
     /* USER CODE BEGIN LL_EXTI_LINE_8_RISING */
-
+        void cs_raising_irq(void);
+        cs_raising_irq();
     /* USER CODE END LL_EXTI_LINE_8_RISING */
   }
   /* USER CODE BEGIN EXTI4_15_IRQn 1 */
@@ -189,7 +191,9 @@ void DMA1_Channel1_IRQHandler(void)
 void DMA1_Channel2_3_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Channel2_3_IRQn 0 */
-
+    LL_DMA_ClearFlag_TC2(DMA1);
+    void spi_end_transfer(void);
+    spi_end_transfer();
   /* USER CODE END DMA1_Channel2_3_IRQn 0 */
   /* USER CODE BEGIN DMA1_Channel2_3_IRQn 1 */
 
