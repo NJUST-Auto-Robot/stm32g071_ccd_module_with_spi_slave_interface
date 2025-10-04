@@ -15,8 +15,8 @@
   *
   ******************************************************************************
   */
-/* USER CODE END Header */
-/* Includes ------------------------------------------------------------------*/
+  /* USER CODE END Header */
+  /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
 #include "dma.h"
@@ -257,11 +257,7 @@ typedef struct {
 frame_data_t frame_data;
 void cs_falling_irq(void)
 {
-    CLEAR_BIT(SPI2->CR1, SPI_CR1_SSI);
-    spi_in_use = 1;
     LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_2);
-    // LL_SPI_Enable(SPI2);
-    //LL_SPI_TransmitData8(SPI2, 0xf0);
     LL_DMA_SetMemoryAddress(DMA1, LL_DMA_CHANNEL_2, (uint32_t)&frame_data);
     LL_DMA_SetPeriphAddress(DMA1, LL_DMA_CHANNEL_2, LL_SPI_DMA_GetRegAddr(SPI2));
     LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_2, sizeof(frame_data));
@@ -270,12 +266,11 @@ void cs_falling_irq(void)
     LL_DMA_ClearFlag_TC2(DMA1);
     LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_2);
     LL_SPI_EnableDMAReq_TX(SPI2);
+    spi_in_use = 1;
 }
 void cs_raising_irq(void)
 {
-    SET_BIT(SPI2->CR1, SPI_CR1_SSI);
     LL_SPI_DisableDMAReq_TX(SPI2);
-    // LL_SPI_Disable(SPI2);
     LL_DMA_ClearFlag_HT2(DMA1);
     LL_DMA_ClearFlag_TE2(DMA1);
     LL_DMA_ClearFlag_TC2(DMA1);
@@ -285,7 +280,9 @@ void cs_raising_irq(void)
 }
 void spi_end_transfer(void)
 {
-
+    LL_SPI_TransmitData8(SPI2, 0xA5);
+    spi_in_use = 0;
+    LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_2);
 }
 
 /* USER CODE END 0 */
@@ -297,43 +294,43 @@ void spi_end_transfer(void)
 int main(void)
 {
 
-  /* USER CODE BEGIN 1 */
+    /* USER CODE BEGIN 1 */
 
-  /* USER CODE END 1 */
+    /* USER CODE END 1 */
 
-  /* MCU Configuration--------------------------------------------------------*/
+    /* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SYSCFG);
-  LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_PWR);
+    /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+    LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_SYSCFG);
+    LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_PWR);
 
-  /* SysTick_IRQn interrupt configuration */
-  NVIC_SetPriority(SysTick_IRQn, 3);
+    /* SysTick_IRQn interrupt configuration */
+    NVIC_SetPriority(SysTick_IRQn, 3);
 
-  /* USER CODE BEGIN Init */
+    /* USER CODE BEGIN Init */
 
-  /* USER CODE END Init */
+    /* USER CODE END Init */
 
-  /* Configure the system clock */
-  SystemClock_Config();
+    /* Configure the system clock */
+    SystemClock_Config();
 
-  /* USER CODE BEGIN SysInit */
+    /* USER CODE BEGIN SysInit */
 
-  /* USER CODE END SysInit */
+    /* USER CODE END SysInit */
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_DMA_Init();
-  MX_ADC1_Init();
-  MX_SPI2_Init();
-  MX_TIM2_Init();
-  MX_TIM3_Init();
-  MX_TIM17_Init();
-  MX_TIM16_Init();
-  MX_TIM6_Init();
-  /* USER CODE BEGIN 2 */
+    /* Initialize all configured peripherals */
+    MX_GPIO_Init();
+    MX_DMA_Init();
+    MX_ADC1_Init();
+    MX_SPI2_Init();
+    MX_TIM2_Init();
+    MX_TIM3_Init();
+    MX_TIM17_Init();
+    MX_TIM16_Init();
+    MX_TIM6_Init();
+    /* USER CODE BEGIN 2 */
 
-    // \phi m clock 2Mhz
+          // \phi m clock 2Mhz
     TIM3->PSC = 0;
     TIM3->ARR = 31;
     TIM3->CCR2 = 15;
@@ -373,11 +370,12 @@ int main(void)
     // LL_mDelay(1);
     ccd_waiting_sh();
 
-    LL_EXTI_EnableRisingTrig_0_31(LL_EXTI_LINE_8);
-    LL_EXTI_EnableFallingTrig_0_31(LL_EXTI_LINE_8);
-    LL_EXTI_EnableIT_0_31(LL_EXTI_LINE_8);
+    LL_EXTI_EnableRisingTrig_0_31(LL_EXTI_LINE_6);
+    LL_EXTI_EnableFallingTrig_0_31(LL_EXTI_LINE_6);
+    LL_EXTI_EnableIT_0_31(LL_EXTI_LINE_6);
     LL_SPI_Enable(SPI2);
-
+    LL_DMA_EnableIT_TC(DMA1, LL_DMA_CHANNEL_2);
+    LL_SPI_TransmitData8(SPI2, 0xA5);
     // ccd_start_icg();
   /* USER CODE END 2 */
 
@@ -421,7 +419,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     }
-  /* USER CODE END 3 */
+    /* USER CODE END 3 */
 }
 
 /**
@@ -430,39 +428,39 @@ int main(void)
   */
 void SystemClock_Config(void)
 {
-  LL_FLASH_SetLatency(LL_FLASH_LATENCY_2);
-  while(LL_FLASH_GetLatency() != LL_FLASH_LATENCY_2)
-  {
-  }
+    LL_FLASH_SetLatency(LL_FLASH_LATENCY_2);
+    while (LL_FLASH_GetLatency() != LL_FLASH_LATENCY_2)
+    {
+    }
 
-  /* HSI configuration and activation */
-  LL_RCC_HSI_Enable();
-  while(LL_RCC_HSI_IsReady() != 1)
-  {
-  }
+    /* HSI configuration and activation */
+    LL_RCC_HSI_Enable();
+    while (LL_RCC_HSI_IsReady() != 1)
+    {
+    }
 
-  /* Main PLL configuration and activation */
-  LL_RCC_PLL_ConfigDomain_SYS(LL_RCC_PLLSOURCE_HSI, LL_RCC_PLLM_DIV_1, 8, LL_RCC_PLLR_DIV_2);
-  LL_RCC_PLL_Enable();
-  LL_RCC_PLL_EnableDomain_SYS();
-  while(LL_RCC_PLL_IsReady() != 1)
-  {
-  }
+    /* Main PLL configuration and activation */
+    LL_RCC_PLL_ConfigDomain_SYS(LL_RCC_PLLSOURCE_HSI, LL_RCC_PLLM_DIV_1, 8, LL_RCC_PLLR_DIV_2);
+    LL_RCC_PLL_Enable();
+    LL_RCC_PLL_EnableDomain_SYS();
+    while (LL_RCC_PLL_IsReady() != 1)
+    {
+    }
 
-  /* Set AHB prescaler*/
-  LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
+    /* Set AHB prescaler*/
+    LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
 
-  /* Sysclk activation on the main PLL */
-  LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_PLL);
-  while(LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_PLL)
-  {
-  }
+    /* Sysclk activation on the main PLL */
+    LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_PLL);
+    while (LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_PLL)
+    {
+    }
 
-  /* Set APB1 prescaler*/
-  LL_RCC_SetAPB1Prescaler(LL_RCC_APB1_DIV_1);
-  LL_Init1msTick(64000000);
-  /* Update CMSIS variable (which can be updated also through SystemCoreClockUpdate function) */
-  LL_SetSystemCoreClock(64000000);
+    /* Set APB1 prescaler*/
+    LL_RCC_SetAPB1Prescaler(LL_RCC_APB1_DIV_1);
+    LL_Init1msTick(64000000);
+    /* Update CMSIS variable (which can be updated also through SystemCoreClockUpdate function) */
+    LL_SetSystemCoreClock(64000000);
 }
 
 /* USER CODE BEGIN 4 */
@@ -475,13 +473,13 @@ void SystemClock_Config(void)
   */
 void Error_Handler(void)
 {
-  /* USER CODE BEGIN Error_Handler_Debug */
-                                                  /* User can add his own implementation to report the HAL error return state */
+    /* USER CODE BEGIN Error_Handler_Debug */
+                                                        /* User can add his own implementation to report the HAL error return state */
     __disable_irq();
     while (1)
     {
     }
-  /* USER CODE END Error_Handler_Debug */
+    /* USER CODE END Error_Handler_Debug */
 }
 
 #ifdef  USE_FULL_ASSERT
@@ -492,11 +490,11 @@ void Error_Handler(void)
   * @param  line: assert_param error line source number
   * @retval None
   */
-void assert_failed(uint8_t *file, uint32_t line)
+void assert_failed(uint8_t* file, uint32_t line)
 {
-  /* USER CODE BEGIN 6 */
-                                                  /* User can add his own implementation to report the file name and line number,
-                                                     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-  /* USER CODE END 6 */
+    /* USER CODE BEGIN 6 */
+                                                        /* User can add his own implementation to report the file name and line number,
+                                                           ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+                                                           /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

@@ -23,9 +23,10 @@ class LinearCCDAdjuster:
         self.serial_port = None
         self.is_connected = False
         self.receiving = False
+        self.ccd_data_lenth = 1000
 
         # 数据存储
-        self.ccd_data = np.zeros(2000, dtype=np.uint16)
+        self.ccd_data = np.zeros(self.ccd_data_lenth, dtype=np.uint16)
         self.actual_length = 0
         self.data_buffer = bytearray()
         self.receive_count = 0
@@ -41,7 +42,9 @@ class LinearCCDAdjuster:
         self.waterfall_image = None
         self.waterfall_photo = None
         self.waterfall_history = 100  # 默认显示100帧历史
-        self.waterfall_data = np.zeros((self.waterfall_history, 2000), dtype=np.uint8)
+        self.waterfall_data = np.zeros(
+            (self.waterfall_history, self.ccd_data_lenth), dtype=np.uint8
+        )
         self.current_row = 0
 
         # 性能优化
@@ -220,7 +223,9 @@ class LinearCCDAdjuster:
     def init_waterfall_image(self):
         """初始化瀑布图图像"""
         # 创建初始图像（全黑）
-        self.waterfall_image = Image.new("L", (2000, self.waterfall_history), 0)
+        self.waterfall_image = Image.new(
+            "L", (self.ccd_data_lenth, self.waterfall_history), 0
+        )
         self.update_waterfall_display()
 
     def update_history_size(self):
@@ -230,7 +235,7 @@ class LinearCCDAdjuster:
             self.waterfall_history = new_history
             # 重新初始化瀑布图数据
             self.waterfall_data = np.zeros(
-                (self.waterfall_history, 2000), dtype=np.uint8
+                (self.waterfall_history, self.ccd_data_lenth), dtype=np.uint8
             )
             self.current_row = 0
             self.init_waterfall_image()
@@ -264,8 +269,8 @@ class LinearCCDAdjuster:
         )
 
         # 确保数据长度一致
-        if len(normalized_data) < 2000:
-            padded_data = np.zeros(2000, dtype=np.uint8)
+        if len(normalized_data) < self.ccd_data_lenth:
+            padded_data = np.zeros(self.ccd_data_lenth, dtype=np.uint8)
             padded_data[: len(normalized_data)] = normalized_data
             normalized_data = padded_data
 
@@ -496,16 +501,16 @@ class LinearCCDAdjuster:
         self.data_buffer.extend(data)
 
         frame_found = True
-        while frame_found and len(self.data_buffer) >= 4000:
+        while frame_found and len(self.data_buffer) >= 2048:
             frame_found = False
 
             # 查找帧头
-            for i in range(len(self.data_buffer) - 7):
+            for i in range(len(self.data_buffer) - 9):
                 if (
-                    self.data_buffer[i] == 0x3D
-                    and self.data_buffer[i + 1] == 0x7E
-                    and self.data_buffer[i + 6] == 0x7E
-                    and self.data_buffer[i + 7] == 0x3D
+                    self.data_buffer[i] == 0x07
+                    and self.data_buffer[i + 1] == 0x21
+                    and self.data_buffer[i + 8] == 0x21
+                    and self.data_buffer[i + 9] == 0x07
                 ):
                     data_mode = 0
 
@@ -513,22 +518,22 @@ class LinearCCDAdjuster:
                     data_length = self.data_buffer[i + 2] + (
                         self.data_buffer[i + 3] << 8
                     )
-                    if self.data_buffer[i + 4] == 1:
+                    if self.data_buffer[i + 6] == 1:
                         data_mode = 1
                     if data_mode == 1:
-                        total_frame_length = 8 + data_length
+                        total_frame_length = 10 + data_length
                         self.max_data = 255
                     else:
-                        total_frame_length = 8 + data_length * 2
+                        total_frame_length = 10 + data_length * 2
                         self.max_data = 4095
 
                     if len(self.data_buffer) - i >= total_frame_length:
                         # 提取数据部分
-                        data_start = i + 8
+                        data_start = i + 10
                         if data_mode == 1:
-                            data_end = 8 + data_length
+                            data_end = 10 + data_length
                         else:
-                            data_end = 8 + data_length * 2
+                            data_end = 10 + data_length * 2
                         data_section = self.data_buffer[data_start:data_end]
 
                         # 解析CCD数据
