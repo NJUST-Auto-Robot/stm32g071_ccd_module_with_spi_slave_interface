@@ -26,10 +26,24 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#define USE_DATA_NUM 1000
+#if (USE_DATA_NUM>1500)
+error("max is 1500");
+#endif
+
+#define DEFULT_EXPLOSE_TIME_US 2000 
+#define USE_AUTO_EXPLOSE 0
+
+#if USE_AUTO_EXPLOSE==1
 #include "pid.h"
 pid_t explose_pid;
 uint32_t pixel_sum;
-#define USE_DATA_NUM 1000
+#define AUTO_EXPLOSE_MAX_US 150000
+#define AUTO_EXPLOSE_MIN_US 200
+#define EXPLOSE_PID_P 0.01
+#define EXPLOSE_PID_I 0
+#define EXPLOSE_PID_D 0
+#endif
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -66,7 +80,7 @@ __IO enum E_state cur_state;
 uint16_t adc_data[1546];
 uint8_t adc_data_static_u8[USE_DATA_NUM];
 __IO uint8_t ccd_frame_ok = 0;
-__IO int32_t explose_time_us = 2000;
+__IO int32_t explose_time_us = DEFULT_EXPLOSE_TIME_US;
 void ccd_start_icg(void);
 void ccd_one_frame_ok(void);
 __IO uint8_t ccd_want_update_sh_v = 0;
@@ -79,15 +93,12 @@ void ccd_want_update_sh(void)
 void ccd_update_sh(void)
 {
     // LL_TIM_DisableIT_UPDATE(TIM2);
-    if (explose_time_us > 10 && TIM2->ARR != explose_time_us)
+    if (explose_time_us > 10 && TIM2->ARR != explose_time_us - 1)
     {
-        // LL_TIM_DisableCounter(TIM2);
-        TIM2->ARR = explose_time_us;
+        TIM2->ARR = explose_time_us - 1;
         TIM2->CCR2 = TIM2->ARR - 3;
         if (TIM2->CNT > TIM2->CCR2 - 100)
             TIM2->CNT = TIM2->CCR2 - 100;
-        // LL_TIM_GenerateEvent_UPDATE(TIM2);
-    // LL_TIM_EnableCounter(TIM2);
     }
 }
 void ccd_waiting_sh(void)
@@ -173,28 +184,18 @@ void ccd_end_transfer(void)
                 ccd_update_sh();
             }
             uint16_t max = calc_raw_max_dummy();
+#if USE_AUTO_EXPLOSE==1
             pixel_sum = 0;
-            // int err_cnt = 0;
-            // for (int i = 0;i < USE_DATA_NUM;i++)
-            // {
-            //     if (((max - adc_data[i + 32 + (1500 - USE_DATA_NUM) / 2]) < 1))
-            //     {
-            //         err_cnt++;
-            //     }
-            // }
+#endif
             for (int i = 0;i < USE_DATA_NUM;i++)
             {
                 adc_data_static_u8[i] = ((max - adc_data[i + 32 + (1500 - USE_DATA_NUM) / 2])) / 10;
+#if USE_AUTO_EXPLOSE==1
                 pixel_sum += adc_data_static_u8[i];
+#endif
             }
-            // if (err_cnt > 10)
-            // {
-            // }
-            // else
-            // {
             ccd_one_frame_ok();
             ccd_waiting_sh();
-            // }
         }
     }
 }
@@ -207,15 +208,6 @@ void ccd_one_frame_ok(void)
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void spi_trams(uint8_t* d, uint16_t len)
-{
-    for (int i = 0;i < len;i++)
-    {
-        LL_SPI_TransmitData8(SPI2, d[i]);
-        while (!LL_SPI_IsActiveFlag_TXE(SPI2))
-            ;
-    }
-}
 uint16_t calc_raw_max_dummy(void)
 {
     uint32_t sum = 0;;
@@ -227,22 +219,20 @@ uint16_t calc_raw_max_dummy(void)
 }
 void pid_calc_timely(void)
 {
+#if USE_AUTO_EXPLOSE==1
     static int last = 2000;
     if (pixel_sum)
     {
         int exp = pid_calc(&explose_pid, pixel_sum, USE_DATA_NUM * 120);
         last += exp;
-        if (last < 200)
-            last = 300;
-        if (last > 150000)
-            last = 150000;
-        // if (explose_time_us - last > 50 || explose_time_us - last < -50)
-        {
-            // explose_time_us = last / 100 * 100;
-            explose_time_us = last;
-            ccd_want_update_sh();
-        }
+        if (last < AUTO_EXPLOSE_MIN_US)
+            last = AUTO_EXPLOSE_MIN_US;
+        if (last > AUTO_EXPLOSE_MAX_US)
+            last = AUTO_EXPLOSE_MAX_US;
+        explose_time_us = last;
+        ccd_want_update_sh();
     }
+#endif
 }
 __IO uint8_t spi_in_use = 0;
 typedef struct {
@@ -361,13 +351,16 @@ int main(void)
     LL_ADC_Enable(ADC1);
     // LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_8);
 
-    PID_struct_init(&explose_pid, DELTA_PID, 100000, 100000, 0.01, 0, 0);
+#if USE_AUTO_EXPLOSE==1
+    PID_struct_init(&explose_pid, DELTA_PID, 10000, 10000, EXPLOSE_PID_P, EXPLOSE_PID_I, EXPLOSE_PID_D);
     TIM17->PSC = 63999;
     TIM17->ARR = 50;
     LL_TIM_EnableIT_UPDATE(TIM17);
     LL_TIM_EnableCounter(TIM17);
+#endif
     //LL_ADC_REG_StartConversion(ADC1);
     // LL_mDelay(1);
+    ccd_want_update_sh();
     ccd_waiting_sh();
 
     LL_EXTI_EnableRisingTrig_0_31(LL_EXTI_LINE_6);
@@ -397,27 +390,9 @@ int main(void)
                 memcpy(frame_data.frame_data, adc_data_static_u8, USE_DATA_NUM);
             }
         }
-        // if (ccd_frame_ok)
-    // {
-    //     ccd_frame_ok = 0;
-    //     uint8_t d[8] = { 0x3d, 0x7e ,0,0,1,0, 0x7e, 0x3d };
-    //     *(uint16_t*)(d + 2) = USE_DATA_NUM;
-    //     LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_8);
-    //     //LL_mDelay(1);
-    //     spi_trams(d, 8);
-    //     if (d[4])
-    //         spi_trams((uint8_t*)adc_data_static_u8, *(uint16_t*)(d + 2));
-    //     else
-    //     {
-    //         spi_trams((uint8_t*)&adc_data[32 + (1500 - USE_DATA_NUM) / 2], (*(uint16_t*)(d + 2)) * 2);
-    //     }
-    //     LL_mDelay(1);
-    //     LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_8);
-    //     LL_mDelay(1);
-    // }
-    /* USER CODE END WHILE */
+        /* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
+        /* USER CODE BEGIN 3 */
     }
     /* USER CODE END 3 */
 }
